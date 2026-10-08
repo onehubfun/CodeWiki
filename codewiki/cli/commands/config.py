@@ -69,13 +69,14 @@ def config_group():
             "azure-openai",
             "claude-code",
             "codex",
+            "trae",
         ],
         case_sensitive=False,
     ),
     help=(
         "LLM provider type (default: openai-compatible). "
         "Use 'atlas-cloud' for Atlas Cloud (base URL auto-set; reads ATLASCLOUD_API_KEY). "
-        "Use 'claude-code' or 'codex' to run on a CLI subscription instead of an API key."
+        "Use 'claude-code', 'codex', or 'trae' to authenticate through a CLI instead of an API key."
     ),
 )
 @click.option("--aws-region", type=str, help="AWS region for Bedrock provider (default: us-east-1)")
@@ -141,6 +142,10 @@ def config_set(
     \b
     # Subscription mode (Codex)
     $ codewiki config set --provider codex --main-model gpt-5.2-codex
+
+    \b
+    # TraeCode CLI 2.0 (requires `traecli login` first)
+    $ codewiki config set --provider trae --main-model YOUR_TRAE_MODEL
 
     \b
     # Update only API key
@@ -430,15 +435,15 @@ def config_show(output_json: bool):
             click.echo("━" * 40)
             click.echo()
 
-            from codewiki.src.be.backend import is_caw_provider
+            from codewiki.src.be.backend import CLI_BINARIES, is_cli_provider
 
-            caw_mode = bool(config) and is_caw_provider(config.provider)
+            cli_mode = bool(config) and is_cli_provider(config.provider)
 
             click.secho("Credentials", fg="cyan", bold=True)
-            if caw_mode:
-                cli_name = "claude" if config.provider == "claude-code" else "codex"
+            if cli_mode:
+                cli_name = CLI_BINARIES[config.provider]
                 click.secho(
-                    f"  Subscription mode: authenticate via '{cli_name} login' (no API key needed)",
+                    f"  CLI mode: authenticate via '{cli_name} login' (no API key needed)",
                     fg="cyan",
                 )
             elif api_key:
@@ -452,7 +457,11 @@ def config_show(output_json: bool):
             if config:
                 click.echo(f"  Provider:         {config.provider}")
                 click.echo(f"  Main Model:       {config.main_model or 'Not set'}")
-                if not caw_mode:
+                if cli_mode:
+                    click.echo(
+                        f"  Cluster Model:    {config.cluster_model or config.main_model or 'Not set'}"
+                    )
+                if not cli_mode:
                     click.echo(f"  Base URL:         {config.base_url or 'Not set'}")
                     click.echo(f"  Cluster Model:    {config.cluster_model or 'Not set'}")
                     click.echo(f"  Fallback Model:   {config.fallback_model or 'Not set'}")
@@ -565,20 +574,20 @@ def config_validate(quick: bool, verbose: bool):
 
         # Load config early so we know the provider for the rest of the checks.
         config = manager.get_config()
-        from codewiki.src.be.backend import is_caw_provider
+        from codewiki.src.be.backend import CLI_BINARIES, is_cli_provider
 
-        caw_mode = bool(config) and is_caw_provider(config.provider)
+        cli_mode = bool(config) and is_cli_provider(config.provider)
 
         # Step 2: Check API key (skipped for subscription providers)
         if verbose:
             click.echo()
             click.echo("[2/5] Checking API key...")
 
-        if caw_mode:
+        if cli_mode:
             if verbose:
-                click.secho("      ✓ API key not required (subscription mode)", fg="green")
+                click.secho("      ✓ API key not required (CLI mode)", fg="green")
             else:
-                click.secho("✓ API key not required (subscription mode)", fg="green")
+                click.secho("✓ API key not required (CLI mode)", fg="green")
         else:
             if verbose:
                 storage = "system keychain" if manager.keyring_available else "encrypted file"
@@ -602,11 +611,11 @@ def config_validate(quick: bool, verbose: bool):
             click.echo()
             click.echo("[3/5] Checking base URL...")
 
-        if caw_mode:
+        if cli_mode:
             if verbose:
-                click.secho("      ✓ Base URL not required (subscription mode)", fg="green")
+                click.secho("      ✓ Base URL not required (CLI mode)", fg="green")
             else:
-                click.secho("✓ Base URL not required (subscription mode)", fg="green")
+                click.secho("✓ Base URL not required (CLI mode)", fg="green")
         else:
             if verbose:
                 click.echo(f"      URL: {config.base_url}")
@@ -630,11 +639,11 @@ def config_validate(quick: bool, verbose: bool):
             click.echo()
             click.echo("[4/5] Checking model configuration...")
             click.echo(f"      Main model: {config.main_model}")
-            if not caw_mode:
+            if not cli_mode:
                 click.echo(f"      Cluster model: {config.cluster_model}")
                 click.echo(f"      Fallback model: {config.fallback_model}")
 
-        if caw_mode:
+        if cli_mode:
             if not config.main_model:
                 click.secho("✗ Main model not configured", fg="red")
                 sys.exit(EXIT_CONFIG_ERROR)
@@ -662,14 +671,14 @@ def config_validate(quick: bool, verbose: bool):
                 )
 
         # Step 5: API connectivity test (unless --quick)
-        if caw_mode:
+        if cli_mode:
             if verbose:
                 click.echo()
                 click.echo("[5/5] Checking CLI availability...")
 
             import shutil
 
-            cli_name = "claude" if config.provider == "claude-code" else "codex"
+            cli_name = CLI_BINARIES[config.provider]
             cli_path = shutil.which(cli_name)
             if not cli_path:
                 click.secho(f"✗ {cli_name} CLI not found in PATH", fg="red")

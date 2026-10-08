@@ -118,7 +118,6 @@ def _patch_codex_tool_timeout() -> None:
     _CODEX_PATCH_APPLIED = True
 
 
-_patch_codex_tool_timeout()
 # --- end stopgap --------------------------------------------------------------
 
 
@@ -202,7 +201,6 @@ def _patch_claude_allowed_tools() -> None:
     _CLAUDE_ALLOWED_PATCH_APPLIED = True
 
 
-_patch_claude_allowed_tools()
 # --- end stopgap --------------------------------------------------------------
 
 
@@ -210,6 +208,8 @@ class CawBackend(LLMBackend):
     """Routes LLM operations through the claude / codex CLI subscription."""
 
     def __init__(self, config: Config) -> None:
+        _patch_codex_tool_timeout()
+        _patch_claude_allowed_tools()
         self._config = config
         self._caw_provider = _resolve_caw_provider(config.provider)
         # main_model is passed straight through; empty string → caw default.
@@ -238,6 +238,20 @@ class CawBackend(LLMBackend):
                 os.environ["MCP_TIMEOUT"],
             )
 
+    def _create_agent(self, system_prompt, *, model=None, toolkit=None):
+        """Construct the CLI session; orchestration is shared with TraeBackend."""
+        return CawAgent(
+            provider=self._caw_provider,
+            model=model or self._model,
+            system_prompt=system_prompt,
+            tools=(
+                _agent_tool_group_for_provider(self._caw_provider)
+                if toolkit is not None
+                else ToolGroup.READER
+            ),
+            tool_servers=[toolkit] if toolkit is not None else [],
+        )
+
     # ------------------------------------------------------------------
     # Single-shot completion (clustering, parent / repo overviews)
     # ------------------------------------------------------------------
@@ -254,12 +268,7 @@ class CawBackend(LLMBackend):
         # documentation_generator) accept this — there is no concurrent work
         # to do while clustering is in flight anyway.
         effective_model = model or self._model
-        agent = CawAgent(
-            provider=self._caw_provider,
-            model=effective_model,
-            tools=ToolGroup.READER,
-            system_prompt=system_prompt,
-        )
+        agent = self._create_agent(system_prompt, model=effective_model)
         traj = agent.completion(prompt)
         self.last_usage = usage_to_dict(getattr(traj, "total_usage", None))
         return traj.result
@@ -286,13 +295,7 @@ class CawBackend(LLMBackend):
         from codewiki.src.be.caw_toolkit import CawToolKit  # local import to avoid cycles
 
         toolkit = CawToolKit(deps=deps, backend=self, allow_subagent=False)
-        agent = CawAgent(
-            provider=self._caw_provider,
-            model=self._model,
-            system_prompt=system_prompt,
-            tools=_agent_tool_group_for_provider(self._caw_provider),
-            tool_servers=[toolkit],
-        )
+        agent = self._create_agent(system_prompt, toolkit=toolkit)
         original_cwd = os.getcwd()
         run_cwd = deps.absolute_docs_path if self._caw_provider == "codex" else self._repo_root
         started = time.time()
@@ -303,7 +306,12 @@ class CawBackend(LLMBackend):
             finally:
                 os.chdir(original_cwd)
         except Exception as e:
-            logger.error("Update agent for %s failed via caw: %s", deps.current_module_name, e)
+            logger.error(
+                "Update agent for %s failed via %s: %s",
+                deps.current_module_name,
+                self._caw_provider,
+                e,
+            )
             raise
         usage = usage_to_dict(getattr(traj, "total_usage", None))
         self.last_usage = usage
@@ -431,13 +439,7 @@ class CawBackend(LLMBackend):
 
         toolkit = CawToolKit(deps=deps, backend=self, allow_subagent=can_delegate)
 
-        agent = CawAgent(
-            provider=self._caw_provider,
-            model=self._model,
-            system_prompt=system_prompt,
-            tools=_agent_tool_group_for_provider(self._caw_provider),
-            tool_servers=[toolkit],
-        )
+        agent = self._create_agent(system_prompt, toolkit=toolkit)
 
         user_prompt = format_user_prompt(
             module_name=module_name,
@@ -492,8 +494,9 @@ class CawBackend(LLMBackend):
             finally:
                 os.chdir(original_cwd)
             logger.info(
-                "Module %s completed via caw (turns=%d, tool_calls=%d)",
+                "Module %s completed via %s (turns=%d, tool_calls=%d)",
                 module_name,
+                self._caw_provider,
                 traj.num_turns,
                 traj.total_tool_calls,
             )
@@ -501,5 +504,7 @@ class CawBackend(LLMBackend):
             file_manager.save_json(deps.module_tree, module_tree_path)
             return deps.module_tree
         except Exception as e:
-            logger.error("Error processing module %s via caw: %s", module_name, e)
+            logger.error(
+                "Error processing module %s via %s: %s", module_name, self._caw_provider, e
+            )
             raise

@@ -5,12 +5,14 @@ CodeWiki has two LLM call shapes:
 * a synchronous single-shot completion (clustering, parent / repo overviews)
 * an asynchronous multi-turn agentic loop with custom tools (per-module docs)
 
-Two implementations satisfy this interface:
+Three implementations satisfy this interface:
 
 * :class:`PydanticAIBackend` — wraps the existing openai-compatible / anthropic
   / bedrock / azure-openai paths via pydantic-ai + litellm.  API-key based.
 * :class:`CawBackend` — routes through the ``claude`` or ``codex`` CLI via the
   :mod:`caw` library, using the user's OAuth subscription.  No API key.
+
+* :class:`TraeBackend` — drives TraeCode CLI 2.0 with a local structured tool loop.
 
 Provider selection happens in one place: :func:`get_backend`.
 """
@@ -66,6 +68,12 @@ def usage_to_dict(usage: Any) -> dict[str, Any] | None:
 
 
 CAW_PROVIDERS = frozenset({"claude-code", "codex"})
+CLI_BINARIES = {"claude-code": "claude", "codex": "codex", "trae": "traecli"}
+
+
+def is_cli_provider(provider: str) -> bool:
+    """Return whether a provider authenticates through a local CLI."""
+    return provider in CLI_BINARIES
 
 
 def is_caw_provider(provider: str) -> bool:
@@ -119,6 +127,10 @@ class LLMBackend(abc.ABC):
 def get_backend(config) -> "LLMBackend":
     """Return the backend instance matching ``config.provider``."""
     provider = getattr(config, "provider", "openai-compatible")
+    if provider == "trae":
+        from codewiki.src.be.trae_backend import TraeBackend
+
+        return TraeBackend(config)
     if is_caw_provider(provider):
         from codewiki.src.be.caw_backend import CawBackend
 

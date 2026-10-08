@@ -166,7 +166,7 @@ keys you pass are changed. Provider examples are in [Providers](providers.md).
 
 | Flag | Meaning |
 | --- | --- |
-| `--provider NAME` | One of `openai-compatible` (default), `atlas-cloud`, `anthropic`, `bedrock`, `azure-openai`, `claude-code`, `codex` |
+| `--provider NAME` | One of `openai-compatible` (default), `atlas-cloud`, `anthropic`, `bedrock`, `azure-openai`, `claude-code`, `codex`, `trae` |
 | `--api-key KEY` | API key. Stored in the system keychain when one is available |
 | `--base-url URL` | Provider endpoint. Set automatically for `atlas-cloud` |
 | `--main-model NAME` | Model for module documentation |

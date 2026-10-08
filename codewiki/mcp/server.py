@@ -505,10 +505,10 @@ async def _legacy_generate_docs(arguments: dict[str, Any]) -> list[TextContent]:
     config = manager.get_config()
     api_key = manager.get_api_key()
 
-    from codewiki.src.be.backend import is_caw_provider
+    from codewiki.src.be.backend import is_cli_provider
 
-    caw_mode = bool(config) and is_caw_provider(getattr(config, "provider", ""))
-    if not api_key and not caw_mode:
+    cli_mode = bool(config) and is_cli_provider(getattr(config, "provider", ""))
+    if not api_key and not cli_mode:
         return [
             _text(
                 json.dumps(
